@@ -1,0 +1,96 @@
+{
+  "name": "loop-now-plugin-slack",
+  "version": "0.1.0",
+  "description": "Talk to a Loop Now project's Manager from Slack, and let Agents reach people in Slack through a managed external identity.",
+  "keywords": [
+    "loop-now-plugin",
+    "slack"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AI-for-anyone/loop-now-plugin-slack.git"
+  },
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.21.0"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test --test-concurrency=1 test/*.test.ts",
+    "validate": "node ../loop-now/plugins/host/dist/main.js validate --load ."
+  },
+  "dependencies": {
+    "@slack/socket-mode": "3.1.0",
+    "@slack/web-api": "8.2.0",
+    "undici": "8.12.3"
+  },
+  "peerDependencies": {
+    "@loop-now/plugin-sdk": "*"
+  },
+  "peerDependenciesMeta": {
+    "@loop-now/plugin-sdk": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "24.13.4",
+    "@types/ws": "8.18.1",
+    "typescript": "5.9.3",
+    "ws": "8.22.0"
+  },
+  "loopNow": {
+    "id": "slack",
+    "displayName": "Slack",
+    "platform": "./platform/index.ts",
+    "permissions": [
+      "inbox.send",
+      "inbox.read",
+      "agents.read",
+      "identities.manage",
+      "state"
+    ],
+    "channels": [
+      {
+        "id": "slack",
+        "label": "Slack",
+        "manageIdentities": true
+      }
+    ],
+    "configSchema": {
+      "type": "object",
+      "properties": {
+        "appToken": {
+          "type": "string",
+          "title": "App-Level Token",
+          "description": "xapp- 开头，带 connections:write 范围（Basic Information › App-Level Tokens）。用于 Socket Mode 接收消息。",
+          "x-secret": true
+        },
+        "botToken": {
+          "type": "string",
+          "title": "Bot Token",
+          "description": "xoxb- 开头（OAuth & Permissions › Bot User OAuth Token）。用于发消息。",
+          "x-secret": true
+        },
+        "dmProject": {
+          "type": "string",
+          "title": "私信转给哪个项目",
+          "description": "项目名（或项目 ID）。给 bot 发的私信转给这个项目的 Manager；留空则不接受私信。该项目须启用本插件。"
+        },
+        "identityTarget": {
+          "type": "string",
+          "title": "代管身份的消息贴到",
+          "description": "Slack 频道 ID（C… 或 G…，在频道详情最下方）或用户 ID（U…，个人资料里“复制成员 ID”）。交给本插件代管的外部身份收到的消息与提问贴到这里，每条线索一个 Slack 线程。",
+          "pattern": "^([CGDUW][A-Z0-9]{2,})?$"
+        },
+        "channels": {
+          "type": "string",
+          "title": "Slack 频道",
+          "description": "本项目对应的 Slack 频道 ID，多个用逗号分隔（如 C0123ABCD, C0456EFGH）。在这些频道里 @bot 的消息转给本项目的 Manager；bot 须先被邀请进频道。",
+          "x-scope": "project"
+        }
+      }
+    }
+  }
+}
