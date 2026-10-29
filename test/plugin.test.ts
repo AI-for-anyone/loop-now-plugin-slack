@@ -115,7 +115,7 @@ describe('人 → Manager', () => {
     assert.equal(s.fake.callsOf('channels.send').length, 1)
   })
 
-  it('没绑定的频道、线程外的普通消息、bot 的消息、没启用插件的项目一律忽略，也不记状态', async () => {
+  it('没绑定的频道、线程外的普通消息（人或机器人）、自己的消息、没启用插件的项目一律忽略，也不记状态', async () => {
     const s = await setup()
     await s.slack.event({ type: 'app_mention', channel: 'C9', user: 'U1', text: '<@UBOT> 有人吗', ts: '1.1' })
     await s.slack.event({ type: 'message', channel: 'C1', channel_type: 'channel', user: 'U1', text: '随便聊聊', ts: '1.2' })
@@ -260,6 +260,118 @@ describe('Agent 的提问', () => {
   })
 })
 
+describe('别的机器人', () => {
+  /** B2：有 bot 用户 U5、app A2 的机器人，在 C1 里说话。 */
+  const bot = (o: Record<string, unknown>) => ({ type: 'message', channel: 'C1', channel_type: 'channel', user: 'U5', bot_id: 'B2', app_id: 'A2', ...o })
+  /** B3：旧式集成（subtype bot_message，没有 bot 用户），bots.info 里是 app A3。 */
+  const legacy = (o: Record<string, unknown>) => ({ type: 'message', subtype: 'bot_message', channel: 'C1', channel_type: 'channel', bot_id: 'B3', username: 'hook', ...o })
+  const replies = (s: Setup) => s.fake.callsOf('channels.reply').map((c) => (c[1] as { text: string }).text)
+
+  it('别的机器人 @bot 按人转给 Manager，发件人注明是机器人；已对应线程里机器人的消息照常转发', async () => {
+    const s = await setup()
+    await s.slack.event(bot({ type: 'app_mention', channel_type: undefined, text: '<@UBOT> 部署失败了', ts: '600.1' }))
+    await until(() => s.fake.state.has('threads/C1/600.1'), '转给 Manager')
+    assert.deepEqual(s.fake.callsOf('channels.send'), [['slack', { to: MANAGER, text: '部署失败了', senderName: '机器人 Slack @Deploy Bot' }]])
+    assert.equal((s.fake.state.get('threads/C1/600.1') as { botMessages: number }).botMessages, 1)
+    assert.deepEqual(s.slack.callsTo('bots.info').map((c) => c.params.bot), ['B2'])
+
+    // 同一个机器人在线程里接着说不加前缀；人插话时注明是谁。
+    await s.slack.event(bot({ text: '日志在这里', ts: '600.2', thread_ts: '600.1' }))
+    await s.slack.event({ type: 'message', channel: 'C1', channel_type: 'channel', user: 'U1', text: '我来看', ts: '600.3', thread_ts: '600.1' })
+    await until(() => replies(s).length === 2, '线程里的回复')
+    assert.deepEqual(replies(s), ['日志在这里', '@Alice：我来看'])
+
+    // 人开的线程里：旧式集成说话，名字取 bots.info；bots.info 和 users.info 都读不到的机器人用 bot_id。
+    const { messageId } = await startThread(s, '601.1')
+    await s.slack.event(legacy({ text: '构建 #42 通过', ts: '601.2', thread_ts: '601.1' }))
+    await s.slack.event(bot({ user: 'U9', bot_id: 'B9', app_id: 'A9', text: '我是谁', ts: '601.3', thread_ts: '601.1' }))
+    await until(() => replies(s).length === 4, '机器人在人开的线程里')
+    assert.deepEqual(s.fake.callsOf('channels.reply')[2], [messageId, { text: '机器人 @Webhook：构建 #42 通过' }])
+    assert.equal(replies(s)[3], '机器人 @B9：我是谁')
+
+    // 线程外不 @bot 的机器人消息照旧忽略。
+    await s.slack.event(bot({ text: '例行播报', ts: '602.1' }))
+    await settle()
+    assert.equal(s.fake.callsOf('channels.send').length, 2)
+    assert.equal(s.fake.state.has('threads/C1/602.1'), false)
+  })
+
+  it('自己 bot 的消息永远不处理', async () => {
+    const s = await setup()
+    await startThread(s, '610.1')
+    await s.slack.event({ type: 'message', channel: 'C1', channel_type: 'channel', user: 'UBOT', bot_id: 'BBOT', app_id: 'ABOT', text: 'Agent 的回复', ts: '610.2', thread_ts: '610.1' })
+    await s.slack.event(legacy({ bot_id: 'BBOT', text: '旧式', ts: '610.3', thread_ts: '610.1' }))
+    await s.slack.event(bot({ user: undefined, bot_id: 'BX', app_id: 'ABOT', text: '同一个 app', ts: '610.4', thread_ts: '610.1' }))
+    await s.slack.event({ type: 'app_mention', channel: 'C1', user: 'UBOT', bot_id: 'BBOT', app_id: 'ABOT', text: '<@UBOT> 自己', ts: '610.5' })
+    await s.slack.event({ type: 'message', channel: 'D1', channel_type: 'im', user: 'UBOT', bot_id: 'BBOT', app_id: 'ABOT', text: '私信里的自己', ts: '610.6' })
+    await settle()
+    assert.deepEqual(s.fake.callsOf('channels.reply'), [])
+    assert.equal(s.fake.callsOf('channels.send').length, 1)
+    assert.deepEqual(s.slack.callsTo('bots.info'), [])
+  })
+
+  it('auth.test 失败、分不出自己的消息时机器人的消息一律不处理，人的照常', async () => {
+    const s = await setup({ before: (slack) => (slack.authFails = true) })
+    await s.slack.event(bot({ type: 'app_mention', channel_type: undefined, text: '<@UBOT> 你好', ts: '620.1' }))
+    await s.slack.event({ type: 'app_mention', channel: 'C1', user: 'U1', text: '<@UBOT> 你好', ts: '620.2' })
+    await until(() => s.fake.callsOf('channels.send').length === 1, '人的消息')
+    await settle()
+    assert.equal(s.fake.callsOf('channels.send').length, 1)
+    assert.equal((s.fake.callsOf('channels.send')[0]![1] as { senderName: string }).senderName, 'Slack @Alice')
+    assert.equal(s.fake.state.has('threads/C1/620.1'), false)
+  })
+
+  it('同一条线索里机器人的消息到上限后不再转发，在线程里提示一次；人的消息不受限', async () => {
+    const s = await setup()
+    s.fake.config.botMessageLimit = 3
+    await s.slack.event(bot({ type: 'app_mention', channel_type: undefined, text: '<@UBOT> 1', ts: '630.1' }))
+    await until(() => s.fake.state.has('threads/C1/630.1'), '机器人开的线程')
+    for (const n of [2, 3, 4, 5]) await s.slack.event(bot({ text: `${n}`, ts: `630.${n}`, thread_ts: '630.1' }))
+    await until(() => s.slack.callsTo('chat.postMessage').length === 1, '到上限的提示')
+    await settle()
+    assert.deepEqual(replies(s), ['2', '3'])
+    const notice = s.slack.callsTo('chat.postMessage')
+    assert.equal(notice.length, 1, '只提示一次')
+    assert.equal(notice[0]!.params.channel, 'C1')
+    assert.equal(notice[0]!.params.thread_ts, '630.1')
+    assert.match(String(notice[0]!.params.text), /机器人消息到了上限（3 条）/)
+    assert.ok(s.fake.hasLog('info', /到了上限（3 条），之后不再转发/))
+
+    // 人的消息照常转发；别的机器人也算在这条线索的上限里。
+    await s.slack.event({ type: 'message', channel: 'C1', channel_type: 'channel', user: 'U1', text: '人', ts: '630.6', thread_ts: '630.1' })
+    await s.slack.event(legacy({ text: '另一个机器人', ts: '630.7', thread_ts: '630.1' }))
+    await until(() => replies(s).length === 3, '人的消息')
+    await settle()
+    assert.deepEqual(replies(s), ['2', '3', '@Alice：人'])
+    assert.equal(s.slack.callsTo('chat.postMessage').length, 1)
+    assert.deepEqual(
+      [(s.fake.state.get('threads/C1/630.1') as { botMessages: number }).botMessages, (s.fake.state.get('threads/C1/630.1') as { botLimitNoticed: boolean }).botLimitNoticed],
+      [3, true],
+    )
+  })
+
+  it('allowedBots 非空时只转发列表里的机器人（bot 用户 ID 或 app ID），不在列表里的不提示', async () => {
+    const s = await setup()
+    s.fake.config.allowedBots = 'A2'
+    await s.slack.event(bot({ type: 'app_mention', channel_type: undefined, text: '<@UBOT> 列表里的', ts: '640.1' }))
+    await s.slack.event({ type: 'app_mention', channel: 'C1', bot_id: 'B3', text: '<@UBOT> 不在列表里', ts: '640.2' })
+    await until(() => s.fake.state.has('threads/C1/640.1'), '列表里的机器人')
+    await s.slack.event(legacy({ text: '插话', ts: '640.3', thread_ts: '640.1' }))
+    await settle()
+    assert.equal(s.fake.callsOf('channels.send').length, 1)
+    assert.equal(s.fake.state.has('threads/C1/640.2'), false)
+    assert.deepEqual(s.fake.callsOf('channels.reply'), [])
+
+    // 按 bot 用户 ID（事件里有）与 app ID（事件里没有时取 bots.info）都认。
+    s.fake.config.allowedBots = 'U5, A3'
+    await s.slack.event(legacy({ text: '再插话', ts: '640.4', thread_ts: '640.1' }))
+    await s.slack.event(bot({ text: '接着说', ts: '640.5', thread_ts: '640.1' }))
+    await until(() => replies(s).length === 2, '列表里的机器人')
+    assert.deepEqual(replies(s), ['机器人 @Webhook：再插话', '接着说'])
+    assert.deepEqual(s.slack.callsTo('chat.postEphemeral'), [])
+  })
+})
+
 describe('代管外部身份', () => {
   const inbound = (s: Setup, messageId: string, threadId: string, question: { id: string; allowText: boolean } | null = null) => {
     s.fake.seed(messageId, threadId, `消息 ${messageId}`)
@@ -351,7 +463,8 @@ describe('连接', () => {
     const s = await setup({ before: (slack) => slack.openReplies.push({ status: 500, body: 'oops' }, { ok: false, error: 'internal_error' }) })
     assert.equal(s.slack.callsTo('apps.connections.open').length, 3)
     assert.ok(s.fake.hasLog('warn', /连不上 Slack（internal_error），40 毫秒后重连（第 2 次）/))
-    assert.ok(s.fake.hasLog('info', /已重新连上 Slack（之前失败 2 次）/))
+    // 服务端看到连接时客户端还没收到 hello，“已重新连上”稍后才记。
+    await until(() => s.fake.hasLog('info', /已重新连上 Slack（之前失败 2 次）/), '重新连上的日志')
 
     s.fake.secrets.appToken = 'xapp-wrong'
     await s.fake.changeConfig()

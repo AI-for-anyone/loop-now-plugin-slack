@@ -49,6 +49,8 @@ On the plugin's page, **Configuration (配置)**:
 | `botToken` | The Bot Token (`xoxb-…`). Secret. |
 | `dmProject` | Which project direct messages to the bot go to: a project name (or its ID). Empty means DMs are not accepted and the sender is told so. The project must have the plugin enabled. |
 | `identityTarget` | Where messages for managed external identities are posted: a Slack channel ID (`C…`/`G…`, shown at the bottom of the channel's details) or a user ID (`U…`, **Copy member ID** in the profile; posts go to that person's DM with the bot). |
+| `allowedBots` | Forward messages only from these bots: bot user IDs (`U…`, **Copy member ID** in the bot's profile) or app IDs (`A…`), separated by commas. Empty (the default) forwards messages from any bot. See **Other bots** below. |
+| `botMessageLimit` | How many bot messages are forwarded per Slack thread; the default is 20. Past the limit, bot messages in that thread are no longer forwarded and the thread gets one notice. Messages from people do not count. |
 
 The plugin reconnects by itself when the tokens change.
 
@@ -72,13 +74,14 @@ From then on, messages and questions that Agents send to `@ops` appear in Slack 
 - **Keep talking in the thread**: later messages in the same Slack thread, with or without mentioning the bot, continue the same conversation. If someone else joins the thread, their messages are prefixed with their name so the Agent can tell people apart.
 - **Direct messages**: DM the bot; each top-level DM starts a new conversation with the `dmProject` Manager, and the replies arrive in a thread under it.
 - **Questions**: when an Agent asks a question, the message carries one button per option. Clicking one answers the question, and the message is updated to show who chose what. If the question allows free text, your next message in the thread is the answer. If it does not, the bot reminds you to use the buttons. Answers to closed or expired questions are refused with a note on the message.
+- **Other bots**: when another bot (an alerting or CI bot, say) mentions the bot in a bound channel, or posts in one of the plugin's threads, its message is forwarded like a person's, with the sender shown as **机器人 Slack @bot-name** (机器人 means "bot"); when it joins a thread it is prefixed with `机器人 @bot-name：`. To keep bots from talking to each other in a loop, the plugin's own messages are never forwarded, and once `botMessageLimit` bot messages (20 by default) have been forwarded in a thread, further bot messages there are not, and the thread gets one notice. Set `allowedBots` to accept only certain bots. Bots cannot see the notices that are shown only to the sender (for example, that a project has no Manager); for bots those go to the plugin log instead.
 - **Managed identity**: each conversation an Agent starts with the identity becomes a Slack thread in `identityTarget`, headed by who sent it (`manager → ops`). Reply in the thread to answer as that identity, or click a button. (A new top-level message, outside these threads, is a new conversation with the Manager instead, as above.)
 
 ## What the plugin sees and stores
 
 - The bot only receives messages from conversations it is in: channels it has been invited to, and its own DMs.
 - Channel messages outside a thread the plugin started are ignored and not stored. Only mentions of the bot in bound channels, DMs, and messages in mapped threads are processed.
-- Plugin state keeps the mapping between Slack threads and Loop Now threads, plus which Loop Now messages were already posted (for de-duplication): the most recent 500 of each. Replies in older threads are not forwarded.
+- Plugin state keeps the mapping between Slack threads and Loop Now threads (including how many bot messages each thread has forwarded), plus which Loop Now messages were already posted (for de-duplication): the most recent 500 of each. Replies in older threads are not forwarded.
 - Anyone who can see a managed-identity thread can reply or click as that identity, so pick an `identityTarget` that only the right people can read.
 - Message edits, deletions and file attachments are not forwarded; only the text is.
 

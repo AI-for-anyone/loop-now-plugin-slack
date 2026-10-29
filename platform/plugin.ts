@@ -4,6 +4,8 @@
 // - Agent → 人：外部身份交给本插件代管后，identity.inbound 贴到 identityTarget，每条平台线索一个 Slack 线程；
 //   线程里的回复与按钮以该身份的名义送回（api.identities.reply / answer）。
 // Slack 线程（channel + thread_ts）与平台线索的对应存在插件状态里；不在对应线程里的频道消息一律忽略、不存储。
+// 别的机器人 @bot 或在已对应的线程里说话时按人处理（可用 allowedBots 限定是哪些机器人）；防止机器人之间来回对话：
+// 自己 bot 的消息永远不处理，同一条线索里机器人的消息最多转发 botMessageLimit 条。
 
 import type { EventQuestion, InboxMessage, PluginAPI, PluginEvent, QuestionAnswer } from '@loop-now/plugin-sdk'
 import type { WebClient } from '@slack/web-api'
@@ -21,9 +23,18 @@ const NAME_TTL_MS = 60 * 60_000
 const PROJECT_TTL_MS = 60_000
 const SEEN_MAX = 5_000
 
+/** 同一条线索里最多转发多少条机器人的消息（全局配置 botMessageLimit 没填时）。 */
+export const DEFAULT_BOT_LIMIT = 20
+
+/** 只转文字：这些子类型照常处理，编辑、删除、入群等不处理。bot_message 是别的机器人用旧式集成发的消息。 */
+const TEXT_SUBTYPES = new Set(['file_share', 'thread_broadcast', 'bot_message'])
+
 interface Config {
   dmProject?: string
   identityTarget?: string
+  /** 允许的机器人（bot 用户 ID 或 app ID），逗号或空白分隔；为空时所有机器人都允许。 */
+  allowedBots?: string | string[]
+  botMessageLimit?: number
   /** 项目级：逗号或空白分隔的 Slack 频道 ID。 */
   channels?: string | string[]
 }
@@ -52,9 +63,13 @@ export interface ThreadLink {
   identityId: string | null
   /** 线索里最近的一条消息：线程里的回复以它为回复对象。 */
   lastMessageId: string
-  /** kind 为 manager 时：发起这个线程的 Slack 用户。 */
+  /** kind 为 manager 时：发起这个线程的 Slack 用户（机器人没有 bot 用户时是它的 bot_id）。 */
   startedBy: string | null
   question: OpenQuestion | null
+  /** 已转发的机器人消息条数；0.1.0 记下的线程没有这一项，按 0 算。 */
+  botMessages?: number
+  /** 机器人的消息到上限的提示已经贴过。 */
+  botLimitNoticed?: boolean
   at: string
 }
 
@@ -74,19 +89,31 @@ interface SlackMessage {
   type: string
   channel: string
   channel_type?: string
-  user: string
+  /** 机器人的消息里是它的 bot 用户；旧式集成（subtype bot_message）没有。 */
+  user?: string
   text?: string
   ts: string
   thread_ts?: string
   subtype?: string
   bot_id?: string
+  app_id?: string
+  bot_profile?: { app_id?: string }
 }
 
-/** 发提示用：频道、用户、线程。 */
+/** 发消息的一方、频道、线程。 */
 interface Where {
   channel: string
+  /** Slack 用户 ID；机器人没有 bot 用户时是它的 bot_id。 */
   user: string
   threadTs: string
+  /** 发消息的是机器人时：它的 bot_id。 */
+  botId?: string | null
+}
+
+interface BotInfo {
+  name: string | null
+  appId: string | null
+  userId: string | null
 }
 
 export interface PluginOptions {
@@ -125,8 +152,8 @@ function closedNote(code: string | null): string {
   }
 }
 
-/** 项目配置里的频道列表：接受逗号或空白分隔的字符串，也接受数组。 */
-export function channelList(value: unknown): string[] {
+/** 配置里的 ID 列表（频道、机器人）：接受逗号或空白分隔的字符串，也接受数组。 */
+export function idList(value: unknown): string[] {
   const items = Array.isArray(value) ? value : typeof value === 'string' ? value.split(/[\s,，]+/) : []
   return items.filter((v): v is string => typeof v === 'string').map((v) => v.trim()).filter(Boolean)
 }
@@ -147,6 +174,8 @@ class SlackBridge {
   private link: SocketLink | null = null
   private tokens = ''
   private botUserId: string | null = null
+  private botId: string | null = null
+  private appId: string | null = null
   private identifying: Promise<void> | null = null
   /** auth.test 失败后，一分钟内不再试（令牌错了时不必每条消息都报一次）。 */
   private identifyAfter = 0
@@ -156,6 +185,7 @@ class SlackBridge {
   private readonly answeredHere = new Set<string>()
   private readonly locks = new Map<string, Promise<void>>()
   private readonly names = new Map<string, { name: string; at: number }>()
+  private readonly bots = new Map<string, { info: BotInfo; at: number }>()
   private readonly projects = new Map<string, { project: Project; at: number }>()
   private created = 0
 
@@ -208,6 +238,8 @@ class SlackBridge {
     this.link = null
     this.web = null
     this.botUserId = null
+    this.botId = null
+    this.appId = null
     this.identifying = null
     this.identifyAfter = 0
     if (link) await link.stop()
@@ -220,14 +252,17 @@ class SlackBridge {
     this.connect()
   }
 
-  /** bot 自己的用户 id（auth.test）：用来去掉 @bot 的提及、忽略自己发的消息。 */
+  /** bot 自己的用户 id、bot_id 与 app id（auth.test）：用来去掉 @bot 的提及、忽略自己发的消息。 */
   private identify(): Promise<void> {
     const web = this.web
     if (!web) return Promise.resolve()
     if (this.botUserId || Date.now() < this.identifyAfter) return Promise.resolve()
     this.identifying ??= web.auth.test().then(
       (r) => {
-        if (this.web === web) this.botUserId = typeof r.user_id === 'string' ? r.user_id : null
+        if (this.web !== web) return
+        this.botUserId = typeof r.user_id === 'string' ? r.user_id : null
+        this.botId = typeof r.bot_id === 'string' ? r.bot_id : null
+        this.appId = typeof r.app_id === 'string' ? r.app_id : null
       },
       (err: unknown) => {
         this.api.log.error(`botToken 不可用（auth.test：${slackErrorCode(err) ?? describe(err)}）`)
@@ -318,7 +353,7 @@ class SlackBridge {
   /** 绑定了这个频道的项目（只看启用了本插件的项目）。 */
   private projectForChannel(channel: string): string | null {
     const { api } = this
-    const hits = api.config.projects().filter((pid) => channelList(api.config.get<Config>(pid).channels).includes(channel))
+    const hits = api.config.projects().filter((pid) => idList(api.config.get<Config>(pid).channels).includes(channel))
     if (hits.length > 1) api.log.warn(`Slack 频道 ${channel} 绑定在多个项目里（${hits.join('、')}），按 ${hits[0]} 处理`)
     return hits[0] ?? null
   }
@@ -361,12 +396,67 @@ class SlackBridge {
     return name
   }
 
+  /** 机器人的资料（bots.info）；读不到时各项为 null。 */
+  private async botInfo(botId: string): Promise<BotInfo> {
+    const cached = this.bots.get(botId)
+    if (cached && Date.now() - cached.at < NAME_TTL_MS) return cached.info
+    let info: BotInfo = { name: null, appId: null, userId: null }
+    try {
+      const b = (await this.requireWeb().bots.info({ bot: botId })).bot
+      info = { name: b?.name || null, appId: b?.app_id || null, userId: b?.user_id || null }
+    } catch (err) {
+      this.api.log.warn(`读 Slack 机器人 ${botId} 失败（${slackErrorCode(err) ?? describe(err)}）`)
+    }
+    this.bots.set(botId, { info, at: Date.now() })
+    return info
+  }
+
+  /** 发消息的一方的名字：人取 users.info；机器人取 bots.info，读不到再试它的 bot 用户，都读不到用 bot_id。 */
+  private async senderName(where: Where): Promise<string> {
+    if (!where.botId) return this.userName(where.user)
+    const info = await this.botInfo(where.botId)
+    if (info.name) return info.name
+    if (where.user !== where.botId) {
+      const name = await this.userName(where.user)
+      if (name !== where.user) return name
+    }
+    return where.botId
+  }
+
+  /** allowedBots 为空时所有机器人都允许；否则只允许列表里的（bot 用户 ID 或 app ID）。 */
+  private async botAllowed(e: SlackMessage, botId: string): Promise<boolean> {
+    const allowed = idList(this.api.config.get<Config>().allowedBots)
+    if (!allowed.length) return true
+    const hit = (ids: (string | null | undefined)[]) => ids.some((id) => id && allowed.includes(id))
+    if (hit([e.user, e.app_id, e.bot_profile?.app_id])) return true
+    const info = await this.botInfo(botId)
+    return hit([info.userId, info.appId])
+  }
+
+  private botLimit(): number {
+    const n = this.api.config.get<Config>().botMessageLimit
+    return typeof n === 'number' && Number.isInteger(n) && n >= 1 ? n : DEFAULT_BOT_LIMIT
+  }
+
+  /** 自己 bot 发的消息（包括插件贴出的回复和提示）。 */
+  private isOwn(e: SlackMessage): boolean {
+    return (
+      (this.botUserId !== null && e.user === this.botUserId) ||
+      (this.botId !== null && e.bot_id === this.botId) ||
+      (this.appId !== null && (e.app_id ?? e.bot_profile?.app_id) === this.appId)
+    )
+  }
+
   private slackText(text: string): Promise<string> {
     return fromSlack(text, { botUserId: this.botUserId, userName: (id) => this.userName(id) })
   }
 
-  /** 只给这个人看的提示；发不出去时记日志。 */
+  /** 只给这个人看的提示；发不出去时记日志。机器人看不到，只记日志。 */
   private async notice(where: Where, text: string): Promise<void> {
+    if (where.botId) {
+      this.api.log.info(`没有给机器人 ${where.botId} 发提示：${text}`)
+      return
+    }
     try {
       await this.requireWeb().chat.postEphemeral({ channel: where.channel, user: where.user, thread_ts: where.threadTs, text })
     } catch (err) {
@@ -422,10 +512,14 @@ class SlackBridge {
 
   private async onMessage(e: SlackMessage | undefined): Promise<void> {
     if (!e || (e.type !== 'app_mention' && e.type !== 'message')) return
-    if (typeof e.channel !== 'string' || typeof e.ts !== 'string' || typeof e.user !== 'string') return
-    if (e.bot_id || (e.subtype && e.subtype !== 'file_share' && e.subtype !== 'thread_broadcast')) return
+    if (typeof e.channel !== 'string' || typeof e.ts !== 'string') return
+    const botId = typeof e.bot_id === 'string' && e.bot_id ? e.bot_id : null
+    const user = typeof e.user === 'string' && e.user ? e.user : botId
+    if (!user || (e.subtype && !TEXT_SUBTYPES.has(e.subtype))) return
     await this.identify()
-    if (e.user === this.botUserId) return
+    if (this.isOwn(e)) return
+    // 不知道自己是谁（auth.test 失败）时分不出哪些是自己的消息：机器人的消息一律不处理。
+    if (botId && (!this.botUserId || !this.botId)) return
     const isIm = e.channel_type === 'im' || e.channel.startsWith('D')
     // 频道里 @bot 的消息 Slack 会以 app_mention 和 message 各送一次，只按 app_mention 处理。
     if (e.type === 'message' && !isIm && this.botUserId && e.text?.includes(`<@${this.botUserId}`)) return
@@ -435,7 +529,11 @@ class SlackBridge {
       // 频道里没有 @bot 的消息只在已对应的线程里才处理；其余忽略，也不记。
       if (!link && e.type === 'message' && !isIm) return
       if (!this.remember(`${e.channel}:${e.ts}`)) return
-      const where = { channel: e.channel, user: e.user, threadTs }
+      const where: Where = { channel: e.channel, user, threadTs, botId }
+      if (botId && !(await this.botAllowed(e, botId))) {
+        this.api.log.debug(`机器人 ${botId} 不在 allowedBots 里，忽略它在 ${e.channel} 的消息`)
+        return
+      }
       if (link) await this.followUp(link, e, where)
       else await this.startConversation(e, where, isIm)
     })
@@ -459,12 +557,23 @@ class SlackBridge {
     try {
       const project = await this.project(projectId)
       if (!project.managerAgentId) return this.notice(where, `项目“${project.name}”还没有指定 Manager，消息没有转出。`)
-      const name = await this.userName(e.user)
-      const msg = await api.channels.send(CHANNEL, { to: project.managerAgentId, text, senderName: `Slack @${name}`.slice(0, 100) })
-      await this.saveLink(
-        { kind: 'manager', channel: e.channel, threadTs: where.threadTs, threadId: msg.threadId, projectId, identityId: null, lastMessageId: msg.id, startedBy: e.user, question: null, at: new Date().toISOString() },
-        true,
-      )
+      const name = await this.senderName(where)
+      const senderName = `${where.botId ? '机器人 ' : ''}Slack @${name}`.slice(0, 100)
+      const msg = await api.channels.send(CHANNEL, { to: project.managerAgentId, text, senderName })
+      const link: ThreadLink = {
+        kind: 'manager',
+        channel: e.channel,
+        threadTs: where.threadTs,
+        threadId: msg.threadId,
+        projectId,
+        identityId: null,
+        lastMessageId: msg.id,
+        startedBy: where.user,
+        question: null,
+        at: new Date().toISOString(),
+      }
+      if (where.botId) link.botMessages = 1
+      await this.saveLink(link, true)
     } catch (err) {
       api.log.warn(`转给 Manager 失败：${describe(err)}`)
       await this.notice(where, `没能转给 Manager：${describe(err)}`)
@@ -473,6 +582,8 @@ class SlackBridge {
 
   /** 已对应的线程里的后续消息：有可文字作答的提问时作答，否则作为回复。 */
   private async followUp(link: ThreadLink, e: SlackMessage, where: Where): Promise<void> {
+    const limit = this.botLimit()
+    if (where.botId && (link.botMessages ?? 0) >= limit) return this.botLimitReached(link, limit)
     const text = await this.slackText(e.text ?? '')
     if (!text) return
     const q = link.question && !(link.question.deadline && Date.parse(link.question.deadline) <= Date.now()) ? link.question : null
@@ -485,13 +596,17 @@ class SlackBridge {
         msg = await this.api.identities.reply(link.identityId!, link.lastMessageId, { text })
       } else {
         // 线程里换了人说话时注明是谁，Agent 才分得清。
-        const who = link.startedBy && e.user !== link.startedBy ? `@${await this.userName(e.user)}：` : ''
+        const who = link.startedBy && where.user !== link.startedBy ? `${where.botId ? '机器人 ' : ''}@${await this.senderName(where)}：` : ''
         msg = await this.api.channels.reply(link.lastMessageId, { text: who + text })
       }
       link.lastMessageId = msg.id
       if (q) link.question = null
+      if (where.botId) link.botMessages = (link.botMessages ?? 0) + 1
       await this.saveLink(link)
-      if (q) await this.closeQuestion(link.channel, q, msg.answerTo ? `已用文字回答（<@${e.user}>）` : '提问已关闭，这条回复作为普通消息送达')
+      if (q) {
+        const by = e.user ? `<@${e.user}>` : escapeMrkdwn(await this.senderName(where))
+        await this.closeQuestion(link.channel, q, msg.answerTo ? `已用文字回答（${by}）` : '提问已关闭，这条回复作为普通消息送达')
+      }
     } catch (err) {
       if (q && statusOf(err) === 409) {
         link.question = null
@@ -502,6 +617,23 @@ class SlackBridge {
       }
       this.api.log.warn(`Slack 线程里的回复没有送达：${describe(err)}`)
       await this.notice(where, `没有送达 Loop Now：${describe(err)}`)
+    }
+  }
+
+  /** 线程里机器人的消息到了上限：不再转发，在线程里提示一次。 */
+  private async botLimitReached(link: ThreadLink, limit: number): Promise<void> {
+    if (link.botLimitNoticed) return
+    link.botLimitNoticed = true
+    await this.saveLink(link)
+    this.api.log.info(`Slack 线程 ${link.channel}/${link.threadTs} 里转发的机器人消息到了上限（${limit} 条），之后不再转发`)
+    try {
+      await this.requireWeb().chat.postMessage({
+        channel: link.channel,
+        thread_ts: link.threadTs,
+        text: `这个线程里转给 Loop Now 的机器人消息到了上限（${limit} 条）：之后机器人的消息不再转发，人的消息照常转发。`,
+      })
+    } catch (err) {
+      this.api.log.warn(`在 Slack 线程里提示机器人消息到上限失败（${slackErrorCode(err) ?? describe(err)}）`)
     }
   }
 

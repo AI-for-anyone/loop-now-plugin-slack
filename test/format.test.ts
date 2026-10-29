@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 
 import register from '../platform/index.ts'
 import { chunks, closedBlocks, escapeMrkdwn, fallbackText, fromSlack, messageBlocks, questionBlocks, slackDate } from '../platform/format.ts'
-import { channelList } from '../platform/plugin.ts'
+import { DEFAULT_BOT_LIMIT, idList } from '../platform/plugin.ts'
 
 describe('Slack → 平台的文字', () => {
   const o = { botUserId: 'UBOT', userName: async (id: string) => ({ U1: 'Alice', U2: 'Bob' })[id] ?? id }
@@ -58,11 +58,11 @@ describe('平台 → Slack 的消息', () => {
 })
 
 describe('配置', () => {
-  it('项目的 Slack 频道接受逗号、空白分隔的字符串或数组', () => {
-    assert.deepEqual(channelList('C1, C2，C3\nG4  '), ['C1', 'C2', 'C3', 'G4'])
-    assert.deepEqual(channelList(['C1', ' C2 ', 3]), ['C1', 'C2'])
-    assert.deepEqual(channelList(undefined), [])
-    assert.deepEqual(channelList(''), [])
+  it('频道与机器人的 ID 列表接受逗号、空白分隔的字符串或数组', () => {
+    assert.deepEqual(idList('C1, C2，C3\nG4  '), ['C1', 'C2', 'C3', 'G4'])
+    assert.deepEqual(idList(['C1', ' C2 ', 3]), ['C1', 'C2'])
+    assert.deepEqual(idList(undefined), [])
+    assert.deepEqual(idList(''), [])
   })
 
   it('入口默认导出 register', () => {
@@ -84,7 +84,8 @@ describe('清单', () => {
     assert.deepEqual(pkg.loopNow.permissions, ['inbox.send', 'inbox.read', 'agents.read', 'identities.manage', 'state'])
     assert.deepEqual(pkg.loopNow.channels, [{ id: 'slack', label: 'Slack', manageIdentities: true }])
     const props = pkg.loopNow.configSchema.properties
-    assert.deepEqual(Object.keys(props), ['appToken', 'botToken', 'dmProject', 'identityTarget', 'channels'])
+    assert.deepEqual(Object.keys(props), ['appToken', 'botToken', 'dmProject', 'identityTarget', 'allowedBots', 'botMessageLimit', 'channels'])
+    assert.equal(props.botMessageLimit.default, DEFAULT_BOT_LIMIT)
     assert.equal(props.appToken['x-secret'], true)
     assert.equal(props.botToken['x-secret'], true)
     assert.equal(props.channels['x-scope'], 'project')

@@ -42,6 +42,13 @@ export class FakeSlack {
   readonly messages: Posted[] = []
   readonly acks: string[] = []
   readonly users = new Map<string, string>([['U1', 'Alice'], ['U2', 'Bob']])
+  /** bots.info 认得的机器人。 */
+  readonly bots = new Map<string, { name: string; app_id: string; user_id?: string }>([
+    ['B2', { name: 'Deploy Bot', app_id: 'A2', user_id: 'U5' }],
+    ['B3', { name: 'Webhook', app_id: 'A3' }],
+  ])
+  /** auth.test 返回 invalid_auth（Bot Token 的其余调用照常）。 */
+  authFails = false
   /** apps.connections.open 接下来的回答（用完后正常回答）。 */
   readonly openReplies: Reply[] = []
   connections = 0
@@ -121,7 +128,11 @@ export class FakeSlack {
       case 'apps.connections.open':
         return { ok: true, url: `ws://127.0.0.1:${this.port}/link` }
       case 'auth.test':
-        return { ok: true, user_id: BOT_USER, bot_id: 'BBOT', team_id: 'T1' }
+        return this.authFails ? { ok: false, error: 'invalid_auth' } : { ok: true, user_id: BOT_USER, bot_id: 'BBOT', app_id: 'ABOT', team_id: 'T1' }
+      case 'bots.info': {
+        const bot = this.bots.get(String(params.bot))
+        return bot ? { ok: true, bot: { id: params.bot, ...bot } } : { ok: false, error: 'bot_not_found' }
+      }
       case 'users.info': {
         const name = this.users.get(String(params.user))
         return name ? { ok: true, user: { id: params.user, name: name.toLowerCase(), profile: { display_name: name } } } : { ok: false, error: 'user_not_found' }
