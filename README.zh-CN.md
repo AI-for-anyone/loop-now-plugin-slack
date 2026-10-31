@@ -1,6 +1,6 @@
 # Loop Now Slack 插件
 
-[English](README.md)
+[English](https://github.com/AI-for-anyone/loop-now-plugin-slack/blob/main/README.md)
 
 一个 [Loop Now](https://github.com/AI-for-anyone/loop-now) 插件，把 Slack 工作区双向接进来：
 
@@ -17,7 +17,7 @@
 ## 1. 建 Slack 应用
 
 1. 打开 <https://api.slack.com/apps>，选 **Create New App › From a manifest**，选工作区。
-2. 在 JSON 页签里粘贴 [`slack-app-manifest.json`](slack-app-manifest.json) 的内容，**Create**。
+2. 在 JSON 页签里粘贴 [`slack-app-manifest.json`](https://github.com/AI-for-anyone/loop-now-plugin-slack/blob/main/slack-app-manifest.json) 的内容，**Create**。
 3. **Install to Workspace**，同意申请的权限。
 
 这份清单打开了 Socket Mode、交互（回答按钮要用）、App Home 的消息页签（人才能给 bot 发私信），订阅 bot 事件 `app_mention`、`message.im`、`message.channels`、`message.groups`，申请 bot 权限 `app_mentions:read`、`chat:write`、`im:history`、`im:read`、`im:write`、`channels:history`、`groups:history`、`channels:read`、`users:read`。
@@ -29,7 +29,7 @@
 
 ## 3. 在 Loop Now 里安装
 
-控制台：**插件 › 安装插件 › 来源选 git 仓库**，仓库地址填 `https://github.com/AI-for-anyone/loop-now-plugin-slack.git`，可选填分支、标签或提交。或者用命令行：
+控制台：**插件市场** › **安装插件**，来源选 **git 仓库**，**仓库地址** 填 `https://github.com/AI-for-anyone/loop-now-plugin-slack.git`，可选填分支、标签或提交。或者用命令行：
 
 ```sh
 loopctl plugin install https://github.com/AI-for-anyone/loop-now-plugin-slack.git@main --force
@@ -41,7 +41,7 @@ loopctl plugin install https://github.com/AI-for-anyone/loop-now-plugin-slack.gi
 
 ## 4. 配置
 
-在插件详情页的 **配置**：
+插件的 **配置** 页（**插件市场** › **Slack** › **详情** › **配置**）：
 
 | 字段 | 说明 |
 |---|---|
@@ -56,14 +56,14 @@ loopctl plugin install https://github.com/AI-for-anyone/loop-now-plugin-slack.gi
 
 ## 5. 在项目里启用并绑定频道
 
-项目的 **插件** 页：启用 **Slack**，在 `channels` 里填这个项目对应的 Slack 频道 ID，多个用逗号分隔（例如 `C0123ABCD, C0456EFGH`）。然后在 Slack 里把 bot 邀请进这些频道（`/invite @Loop Now`）。
+**项目设置** › **插件** › **管理项目插件**：启用 **Slack**，在 **这个项目的配置** 的 `channels` 里填这个项目对应的 Slack 频道 ID，多个用逗号分隔（例如 `C0123ABCD, C0456EFGH`）。然后在 Slack 里把 bot 邀请进这些频道（`/invite @Loop Now`）。
 
 插件服务哪些项目，就看哪些项目启用了它。没有绑定到已启用项目的频道一律忽略；同一个频道绑在两个项目里时按第一个处理，并记一条警告。
 
 ## 6. 让插件代管外部身份（可选）
 
 1. 在控制台的 **外部身份** 里建一个身份（如果还没有），例如 `ops`。
-2. 在它的页面上，**代管** › **代管的插件渠道** 选 **Slack › Slack**。
+2. 在它的页面上，**代管** 里的 **代管的插件渠道** 选 **Slack · Slack**，保存。
 3. 确认已经填了 `identityTarget`。
 
 之后 Agent 发给 `@ops` 的消息和提问出现在 Slack 里，而不在这个身份的收件箱里等着。

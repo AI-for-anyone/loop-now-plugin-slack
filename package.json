@@ -1,6 +1,6 @@
 {
   "name": "loop-now-plugin-slack",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": {
     "zh-CN": "在 Slack 频道或私信里和项目 Manager 对话；代管一个外部身份，让 Agent 的消息和提问到 Slack 里找人。Socket Mode，不需要公网地址。",
     "en-US": "Talk to a project's Manager from Slack channels or direct messages, and manage an external identity so that Agents' messages and questions reach people in Slack. Uses Socket Mode, so no public URL is needed."

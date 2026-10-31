@@ -1,6 +1,6 @@
 # Loop Now for Slack
 
-[中文](README.zh-CN.md)
+[中文](https://github.com/AI-for-anyone/loop-now-plugin-slack/blob/main/README.zh-CN.md)
 
 A [Loop Now](https://github.com/AI-for-anyone/loop-now) plugin that connects a Slack workspace in both directions:
 
@@ -17,7 +17,7 @@ The plugin connects with [Socket Mode](https://docs.slack.dev/apis/events-api/us
 ## 1. Create the Slack app
 
 1. Open <https://api.slack.com/apps>, choose **Create New App › From a manifest**, and pick your workspace.
-2. Paste the contents of [`slack-app-manifest.json`](slack-app-manifest.json) (JSON tab), then **Create**.
+2. Paste the contents of [`slack-app-manifest.json`](https://github.com/AI-for-anyone/loop-now-plugin-slack/blob/main/slack-app-manifest.json) (JSON tab), then **Create**.
 3. **Install to Workspace** and allow the requested scopes.
 
 The manifest turns on Socket Mode, interactivity (for the answer buttons), the App Home messages tab (so people can DM the bot), the bot events `app_mention`, `message.im`, `message.channels` and `message.groups`, and these bot scopes: `app_mentions:read`, `chat:write`, `im:history`, `im:read`, `im:write`, `channels:history`, `groups:history`, `channels:read`, `users:read`.
@@ -29,7 +29,7 @@ The manifest turns on Socket Mode, interactivity (for the answer buttons), the A
 
 ## 3. Install the plugin in Loop Now
 
-The console is in Chinese; the labels it shows are given in parentheses. In the console: **Plugins (插件) › Install plugin (安装插件) › git repository (git 仓库)**, repository URL `https://github.com/AI-for-anyone/loop-now-plugin-slack.git`, optionally a branch, tag or commit. Or with the CLI:
+In the console: **Plugin market** › **Install plugin**, source **git repository**, **Repository URL** `https://github.com/AI-for-anyone/loop-now-plugin-slack.git`, and optionally a branch, tag or commit. Or with the CLI:
 
 ```sh
 loopctl plugin install https://github.com/AI-for-anyone/loop-now-plugin-slack.git@main --force
@@ -41,7 +41,7 @@ Before installing, the console shows what the plugin asks for: permissions `inbo
 
 ## 4. Configure
 
-On the plugin's page, **Configuration (配置)**:
+On the plugin's **Config** tab (**Plugin market** › **Slack** › **Details** › **Config**):
 
 | Field | Meaning |
 |---|---|
@@ -56,14 +56,14 @@ The plugin reconnects by itself when the tokens change.
 
 ## 5. Enable it in a project and bind channels
 
-In the project, **Plugins (插件)**: enable **Slack** and fill in `channels` with the Slack channel IDs for this project, separated by commas (for example `C0123ABCD, C0456EFGH`). Then invite the bot to each of those channels in Slack (`/invite @Loop Now`).
+**Project settings** › **Plugins** › **Manage project plugins**: enable **Slack**, and under **This project's config** fill in `channels` with the Slack channel IDs for this project, separated by commas (for example `C0123ABCD, C0456EFGH`). Then invite the bot to each of those channels in Slack (`/invite @Loop Now`).
 
 Which projects the plugin serves is simply which projects have it enabled. A channel that is not bound to an enabled project is ignored. If a channel is bound in two projects, the first one is used and a warning is logged.
 
 ## 6. Let the plugin manage an external identity (optional)
 
-1. Create an external identity in the console (**External identities (外部身份)**) if you do not have one, for example `ops`.
-2. On its page, under **Managed by (代管)**, choose **Slack › Slack** as the managing plugin channel (代管的插件渠道).
+1. Create an external identity in the console (**External identities**) if you do not have one, for example `ops`.
+2. On its page, under **Managed by**, choose **Slack · Slack** as the **Managing plugin channel**, and save.
 3. Make sure `identityTarget` is set.
 
 From then on, messages and questions that Agents send to `@ops` appear in Slack instead of that identity's inbox.
