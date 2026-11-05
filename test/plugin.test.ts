@@ -190,7 +190,9 @@ describe('Agent 的提问', () => {
   it('提问贴成按钮；点按钮用 api.channels.answer 作答，消息改成谁选了什么；只能选项作答时文字不转出', async () => {
     const s = await setup()
     const { threadId } = await startThread(s)
-    await ask(s, threadId, 'q1', { allowText: false, deadline: '2026-11-01T00:00:00Z' })
+    // 截止时间按当前时间往后算：过了截止时间的提问按已关闭处理，文字回复就不再提示点按钮。
+    const deadline = new Date(Math.floor(Date.now() / 1000) * 1000 + 24 * 3600 * 1000).toISOString()
+    await ask(s, threadId, 'q1', { allowText: false, deadline })
     const question = lastMessage(s.slack)
     assert.equal(question.thread_ts, '100.1')
     const actions = question.blocks!.find((b) => b.type === 'actions')!
@@ -199,7 +201,7 @@ describe('Agent 的提问', () => {
       [['发布', { q: 'q1', o: '1' }], ['不发', { q: 'q1', o: '2' }]],
     )
     const hint = question.blocks!.at(-1) as { elements: { text: string }[] }
-    assert.match(hint.elements[0]!.text, /^截止 <!date\^1793491200\^/)
+    assert.match(hint.elements[0]!.text, new RegExp(`^截止 <!date\\^${Date.parse(deadline) / 1000}\\^`))
     assert.match(String(question.text), /选项：发布 \/ 不发/)
 
     await s.slack.event({ type: 'message', channel: 'C1', channel_type: 'channel', user: 'U1', text: '我想想', ts: '100.2', thread_ts: '100.1' })
