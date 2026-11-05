@@ -7,7 +7,7 @@ A [Loop Now](https://github.com/AI-for-anyone/loop-now) plugin that connects a S
 - **People → Manager.** Mention the bot in a Slack channel bound to a project, or send the bot a direct message. The message goes to that project's Manager. The Manager's replies come back in the same Slack thread, and so do any questions it asks, rendered as buttons.
 - **Agents → people.** Hand an external identity over to this plugin. Messages and questions that Agents send to that identity are posted to Slack, one Slack thread per conversation. Replies and button clicks in those threads go back to Loop Now as that identity, so a waiting task resumes exactly as if the person had answered in the console.
 
-The plugin connects with [Socket Mode](https://docs.slack.dev/apis/events-api/using-socket-mode), so Loop Now does not need a public URL. It is a platform-only plugin: it has no Agent half, and it is loaded by Loop Now's plugin host straight from `platform/index.ts`, with no build step.
+The plugin connects with [Socket Mode](https://docs.slack.dev/apis/events-api/using-socket-mode), so Loop Now does not need a public URL. It is a platform-only plugin: it has no Agent side, and it is loaded by Loop Now's plugin host straight from `platform/index.ts`, with no build step.
 
 ## Requirements
 

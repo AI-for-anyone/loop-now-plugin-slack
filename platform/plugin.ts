@@ -1,4 +1,4 @@
-// Slack 插件的平台半边。两个方向：
+// Slack 插件的平台侧。两个方向：
 // - 人 → Manager：在绑定了项目的频道里 @bot，或给 bot 发私信，消息以插件发件方转给该项目的 Manager；
 //   Agent 的回复经 channel.outbound 贴回同一个 Slack 线程，Agent 的提问做成按钮，按钮与线程里的文字经 api.channels.answer 作答。
 // - Agent → 人：外部身份交给本插件代管后，identity.inbound 贴到 identityTarget，每条平台线索一个 Slack 线程；

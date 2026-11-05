@@ -7,7 +7,7 @@
 - **人 → Manager**：在绑定了项目的 Slack 频道里 @bot，或给 bot 发私信，消息转给该项目的 Manager；Manager 的回复贴回同一个 Slack 线程，它的提问做成按钮。
 - **Agent → 人**：把一个外部身份交给本插件代管后，Agent 发给这个身份的消息和提问贴到 Slack，每条线索一个 Slack 线程；线程里的回复和按钮以该身份的名义送回 Loop Now，效果与这个人在控制台里回复相同，等待中的任务随之继续。
 
-插件用 [Socket Mode](https://docs.slack.dev/apis/events-api/using-socket-mode) 连接 Slack，Loop Now 不需要公网地址。它只有平台半边（没有 Agent 半边），由 Loop Now 的插件宿主直接加载 `platform/index.ts`，不需要构建。
+插件用 [Socket Mode](https://docs.slack.dev/apis/events-api/using-socket-mode) 连接 Slack，Loop Now 不需要公网地址。它只有平台侧（没有 Agent 侧），由 Loop Now 的插件宿主直接加载 `platform/index.ts`，不需要构建。
 
 ## 需要
 
